@@ -7,6 +7,8 @@ name = "pypi"
 torch = "*"
 numpy = "*"
 adversarial-robustness-toolbox = "*"
+pandas = "*"
+scikit-image = "*"
 
 [dev-packages]
 
