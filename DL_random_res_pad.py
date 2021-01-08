@@ -19,8 +19,8 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         
-        #resize 
-        #pad
+        # Resize
+        # Pad
         self.conv_1 = nn.Conv2d(in_channels=1, out_channels=4, kernel_size=5, stride=1)
         self.conv_2 = nn.Conv2d(in_channels=4, out_channels=10, kernel_size=5, stride=1)
         self.fc_1 = nn.Linear(in_features=4 * 4 * 10, out_features=100)
@@ -38,19 +38,15 @@ class Net(nn.Module):
 
 
 #%% Step 1: Load the MNIST dataset
-
 (x_train, y_train), (x_test, y_test), min_pixel_value, max_pixel_value = load_mnist()
 
 # Step 1a: Swap axes to PyTorch's NCHW format
-
 x_train = np.swapaxes(x_train, 1, 3).astype(np.float32)
 x_test = np.swapaxes(x_test, 1, 3).astype(np.float32)
 
 #%% Step 2: Create the model
-
 model = Net()
 
 # Step 2a: Define the loss function and the optimizer
-
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
