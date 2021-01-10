@@ -36,7 +36,7 @@ print(f"{device=}")
 
 #%% Step 0: Define the neural network model, return logits instead of activation in forward method
 
-
+# NIPS defense.gi py: https://github.com/cihangxie/NIPS2017_adv_challenge_defense/blob/master/defense.py
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
