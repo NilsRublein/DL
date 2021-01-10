@@ -32,10 +32,16 @@ else:
     device = torch.device('cpu')
 
 print(f"{device=}")
+<<<<<<< HEAD
 
 
 # %% Step 0: Define the neural network model, return logits instead of activation in forward method
 
+=======
+
+#%% Step 0: Define the neural network model, return logits instead of activation in forward method
+
+>>>>>>> Jeroen
 # NIPS defense.gi py: https://github.com/cihangxie/NIPS2017_adv_challenge_defense/blob/master/defense.py
 class Net(nn.Module):
     def __init__(self):
@@ -43,7 +49,11 @@ class Net(nn.Module):
 
         # Resize
         # Pad
+<<<<<<< HEAD
         self.conv_1 = nn.Conv2d(in_channels=299 * 299, out_channels=4, kernel_size=5, stride=1)
+=======
+        self.conv_1 = nn.Conv2d(in_channels=299*299, out_channels=4, kernel_size=5, stride=1)
+>>>>>>> Jeroen
         self.conv_2 = nn.Conv2d(in_channels=4, out_channels=10, kernel_size=5, stride=1)
         self.fc_1 = nn.Linear(in_features=4 * 4 * 10, out_features=100)
         self.fc_2 = nn.Linear(in_features=100, out_features=10)
@@ -114,7 +124,11 @@ def get_labels():
     return labels
 
 
+<<<<<<< HEAD
 # %% Step 1: Load the MNIST dataset
+=======
+#%% Step 1: Load the MNIST dataset
+>>>>>>> Jeroen
 
 def run(use_padding_and_scaling=False, use_MNIST=False):
     if use_padding_and_scaling:
@@ -139,6 +153,20 @@ def run(use_padding_and_scaling=False, use_MNIST=False):
         dataset = CustomDataSet(root_dir=image_folder, transform=transform)
 
         labels = get_labels()
+<<<<<<< HEAD
+=======
+
+        train_size = int(0.8 * len(dataset))
+        test_size = len(dataset) - train_size
+        train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+        trainloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+        testloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
+
+        # Class definitions (indices 0-1000)
+        with open(os.getcwd() + r'\data\labels.txt') as json_file:
+            labels = json.load(json_file)
+            classes = {int(key): val for key, val in labels.items()}
+>>>>>>> Jeroen
 
         train_size = int(0.8 * len(dataset))
         test_size = len(dataset) - train_size
