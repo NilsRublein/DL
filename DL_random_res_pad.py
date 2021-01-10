@@ -3,29 +3,22 @@
 Random resizing and padding as input for a NN
 """
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-import numpy as np
-import os
-import pandas as pd
-from skimage import io  # , transform
 import json
+import os
 import time
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.optim as optim
 # Cannot be installed through Pipenv. Use pip install --no-deps torchvision instead.
 import torchvision
 import torchvision.transforms as transforms
+from skimage import io  # , transform
 from torch.utils.data import Dataset, DataLoader
-from torchvision.utils import make_grid
-from torchvision.utils import save_image
-from torchvision import datasets
 
-from sklearn.model_selection import train_test_split
-from art.utils import load_mnist
-
-import matplotlib.pyplot as plt
 # %%
 use_cuda = True
 
@@ -116,8 +109,8 @@ class CustomDataSet(Dataset):
                 # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
         image = self.transform(image)
-        plt.imshow(image.permute(1, 2, 0))
-        plt.show()
+        # plt.imshow(image.permute(1, 2, 0))
+        # plt.show()
 
         image = self.transform(image)
 
@@ -139,7 +132,7 @@ def get_random_padding(new_size):
     pad_top = np.random.randint(0, max_pad)
     pad_bottom = max_pad - pad_top
 
-    LRTB = (pad_left, pad_top,pad_right, pad_bottom)
+    LRTB = (pad_left, pad_top, pad_right, pad_bottom)
     return LRTB
 
 
@@ -162,30 +155,27 @@ def get_resize():
     return resize_shape
 
 
-# def show_images(images, nmax=64):
-#     fig, ax = plt.subplots(figsize=(8, 8))
-#     ax.set_xticks([])
-#     ax.set_yticks([])
-#     ax.imshow(make_grid((images.detach()[:nmax]), nrow=8).permute(1, 2, 0))
-#
-#
-# def show_batch(dl, nmax=64):
-#     for images in dl:
-#         show_images(images, nmax)
-#         break
-
 def show_sample(dataset, labels, n=4):
-    # fig = plt.figure()
+    fig = plt.figure()
 
     for i in range(len(dataset)):
         image = dataset[i].permute(1, 2, 0)
 
         ax = plt.subplot(1, n, i + 1)
         plt.tight_layout()
-        ax.set_title(f'Label: {labels[i]}')
+        label = labels[i].item()
+        label_text = classes[label]
+
+        try:
+            comma = label_text.index(',')
+            label_text = label_text[:comma]
+        except ValueError:
+            pass
+
+        ax.set_title(f'{label_text} ({label})')
         ax.axis('off')
         plt.imshow(image)
-        if i == n:
+        if i == len(dataset)-1:
             plt.show()
             break
 
@@ -207,6 +197,7 @@ def run(use_padding_and_scaling, batch_size=16):
     # Class definitions (indices 0-1000)
     with open(os.getcwd() + r'\data\labels.txt') as json_file:
         labels = json.load(json_file)
+        global classes
         classes = {int(key): val for key, val in labels.items()}
 
     # %% Step 2: Create the model
@@ -223,9 +214,7 @@ def run(use_padding_and_scaling, batch_size=16):
         model.train()  # Put the network in train mode
         for i, (x_batch, y_batch) in enumerate(trainloader):
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
-            imgs = [t for t in x_batch]
-            labels = [l for l in y_batch]
-            show_sample(imgs, labels, n=4)
+            show_sample(x_batch, y_batch)
             optimizer.zero_grad()  # Set all currently stored gradients to zero
             y_pred = model(x_batch)
             loss = criterion(y_pred, y_batch)
