@@ -83,10 +83,9 @@ class CustomDataSet(Dataset):
     Custom defined dataset. __getitem__ is used to retrieve one element from the dataset.
     """
 
-    def __init__(self, root_dir, transform=None):
+    def __init__(self, root_dir, use_padding_and_scaling):
         self.root_dir = root_dir
-        self.transform = transform
-
+        self.use_padding_and_scaling = use_padding_and_scaling
         self.all_imgs = os.listdir(root_dir)
         self.labels = get_labels()
         self.count = 0
@@ -100,10 +99,10 @@ class CustomDataSet(Dataset):
         img_name = self.all_imgs[index]
         image = io.imread(self.root_dir + "\\" + img_name)
 
-        if not self.transform:
-            new_size = get_resize()
-            ax = plt.subplot(1, 2, 1)
-            plt.imshow(image)
+        new_size = get_resize()
+        plt.imshow(image)
+
+        if self.use_padding_and_scaling:
             self.transform = transforms.Compose([
                 transforms.ToPILImage(),
                 transforms.Resize(size=new_size),  # Default: nearest bilinear
@@ -111,13 +110,16 @@ class CustomDataSet(Dataset):
                 transforms.ToTensor(),
                 # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
-            image = self.transform(image)
-            plt.imshow(image.permute(1, 2, 0))
-            plt.show()
-            self.count += 1
-            print(self.count)
         else:
-            image = self.transform(image)
+            self.transform = transforms.Compose([
+                transforms.ToTensor(),
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        image = self.transform(image)
+        plt.imshow(image.permute(1, 2, 0))
+        plt.show()
+
+        image = self.transform(image)
 
         return image, self.labels[img_name]
 
@@ -151,7 +153,7 @@ def get_labels():
     present_images = os.listdir(path + r"\images")
     labels = {}
     for image in present_images:
-        labels[image] = int(df.loc[df['ImageId'] == image[:-4]]['TrueLabel'].iloc[0])
+        labels[image] = int(df.loc[df['ImageId'] == image[:-4]]['TrueLabel'].iloc[0])-1
     return labels
 
 
@@ -172,72 +174,40 @@ def get_resize():
 #         show_images(images, nmax)
 #         break
 
-def show_sample(dataset, n=4):
-    fig = plt.figure()
+def show_sample(dataset, labels, n=4):
+    # fig = plt.figure()
 
     for i in range(len(dataset)):
-        image = dataset[i]
+        image = dataset[i].permute(1, 2, 0)
+
         ax = plt.subplot(1, n, i + 1)
         plt.tight_layout()
-        ax.set_title('Sample #{}'.format(i))
+        ax.set_title(f'Label: {labels[i]}')
         ax.axis('off')
         plt.imshow(image)
         if i == n:
             plt.show()
             break
 
+
 # %% Step 1: Load the MNIST dataset
 
-def run(use_padding_and_scaling=False, use_MNIST=False, batch_size=16):
-    # if use_padding_and_scaling:
-    #     new_size = get_resize()
-    #     max_padding = 331 - new_size
-    #
-    #     transform = transforms.Compose([
-    #         # transforms.Resize(size=new_size),  # Default: nearest bilinear
-    #         # torchvision.transforms.Pad(padding=get_random_padding(max_padding=max_padding)),
-    #         # transforms.ToTensor(),
-    #     ])
-    # else:
-    #     transform = transforms.Compose([
-    #         transforms.ToTensor(),
-    #     ])
+def run(use_padding_and_scaling, batch_size=16):
 
-    if use_MNIST:
-        (x_train, y_train), (x_test, y_test), min_pixel_value, max_pixel_value = load_mnist()
+    image_folder = os.getcwd() + r"\data\images"
+    labels = get_labels()
 
-        # Swap axes to PyTorch's NCHW format
-        x_train = np.swapaxes(x_train, 1, 3).astype(np.float32)
-        x_test = np.swapaxes(x_test, 1, 3).astype(np.float32)
-    else:
-        image_folder = os.getcwd() + r"\data\images"
-        # x_train = np.load(image_folder)
-        # print(f"Shape of training data: {x_train.shape}")
-        # print(f"Data type: {type(x_train)}")
-        # data = x_train.astype(np.float64)
-        # data = 255 * data
-        # x_train = data.astype(np.uint8)
-        # random_image = np.random.randint(0, len(x_train))
-        # plt.imshow(x_train[random_image])
-        # plt.title(f"Training example #{random_image}")
-        # plt.axis('off')
-        # plt.show()
+    dataset = CustomDataSet(root_dir=image_folder, use_padding_and_scaling=use_padding_and_scaling)
+    train_size = int(0.8 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+    trainloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    testloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
-        dataset = CustomDataSet(root_dir=image_folder, transform=None)
-
-        labels = get_labels()
-        unique_labels = set(labels)
-
-        train_size = int(0.8 * len(dataset))
-        test_size = len(dataset) - train_size
-        train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-        trainloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        testloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
-
-        # Class definitions (indices 0-1000)
-        with open(os.getcwd() + r'\data\labels.txt') as json_file:
-            labels = json.load(json_file)
-            classes = {int(key): val for key, val in labels.items()}
+    # Class definitions (indices 0-1000)
+    with open(os.getcwd() + r'\data\labels.txt') as json_file:
+        labels = json.load(json_file)
+        classes = {int(key): val for key, val in labels.items()}
 
     # %% Step 2: Create the model
     model = Net(num_classes=1000)
@@ -253,7 +223,9 @@ def run(use_padding_and_scaling=False, use_MNIST=False, batch_size=16):
         model.train()  # Put the network in train mode
         for i, (x_batch, y_batch) in enumerate(trainloader):
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
-            print()
+            imgs = [t for t in x_batch]
+            labels = [l for l in y_batch]
+            show_sample(imgs, labels, n=4)
             optimizer.zero_grad()  # Set all currently stored gradients to zero
             y_pred = model(x_batch)
             loss = criterion(y_pred, y_batch)
@@ -285,4 +257,4 @@ def run(use_padding_and_scaling=False, use_MNIST=False, batch_size=16):
 
 if __name__ == "__main__":
     path = os.getcwd() + r"\data"
-    run(use_padding_and_scaling=False, batch_size=4)
+    run(use_padding_and_scaling=True, batch_size=4)
