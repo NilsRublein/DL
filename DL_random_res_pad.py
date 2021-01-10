@@ -102,15 +102,14 @@ class CustomDataSet(Dataset):
 
         if not self.transform:
             new_size = get_resize()
-            max_padding = 331 - new_size
             ax = plt.subplot(1, 2, 1)
             plt.imshow(image)
             self.transform = transforms.Compose([
-                # transforms.ToPILImage(),
-                # transforms.Resize(size=new_size),  # Default: nearest bilinear
-                # torchvision.transforms.Pad(padding=get_random_padding(max_padding=max_padding)),
+                transforms.ToPILImage(),
+                transforms.Resize(size=new_size),  # Default: nearest bilinear
+                torchvision.transforms.Pad(padding=get_random_padding(new_size)),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
             image = self.transform(image)
             plt.imshow(image.permute(1, 2, 0))
@@ -123,18 +122,22 @@ class CustomDataSet(Dataset):
         return image, self.labels[img_name]
 
 
-def get_random_padding(max_padding=30):
+def get_random_padding(new_size):
     """
     Insert random amount on padding on each side.
     pad_left + pad_right = max_padding
     pad_top + pad_bottom = max_padding
     :return tuple
     """
-    pad_left = int(torch.randint(high=max_padding, size=(1, 1)).item())
-    pad_right = max_padding - pad_left
-    pad_top = int(torch.randint(high=max_padding, size=(1, 1)).item())
-    pad_bottom = max_padding - pad_top
-    LRTB = (pad_left, pad_right, pad_top, pad_bottom)
+    max_pad = 331 - new_size
+
+    pad_left = np.random.randint(0, max_pad)
+    pad_right = max_pad - pad_left
+
+    pad_top = np.random.randint(0, max_pad)
+    pad_bottom = max_pad - pad_top
+
+    LRTB = (pad_left, pad_top,pad_right, pad_bottom)
     return LRTB
 
 
@@ -157,22 +160,35 @@ def get_resize():
     return resize_shape
 
 
-def show_images(images, nmax=64):
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.imshow(make_grid((images.detach()[:nmax]), nrow=8).permute(1, 2, 0))
+# def show_images(images, nmax=64):
+#     fig, ax = plt.subplots(figsize=(8, 8))
+#     ax.set_xticks([])
+#     ax.set_yticks([])
+#     ax.imshow(make_grid((images.detach()[:nmax]), nrow=8).permute(1, 2, 0))
+#
+#
+# def show_batch(dl, nmax=64):
+#     for images in dl:
+#         show_images(images, nmax)
+#         break
 
+def show_sample(dataset, n=4):
+    fig = plt.figure()
 
-def show_batch(dl, nmax=64):
-    for images in dl:
-        show_images(images, nmax)
-        break
-
+    for i in range(len(dataset)):
+        image = dataset[i]
+        ax = plt.subplot(1, n, i + 1)
+        plt.tight_layout()
+        ax.set_title('Sample #{}'.format(i))
+        ax.axis('off')
+        plt.imshow(image)
+        if i == n:
+            plt.show()
+            break
 
 # %% Step 1: Load the MNIST dataset
 
-def run(use_padding_and_scaling=False, use_MNIST=False):
+def run(use_padding_and_scaling=False, use_MNIST=False, batch_size=16):
     # if use_padding_and_scaling:
     #     new_size = get_resize()
     #     max_padding = 331 - new_size
@@ -195,15 +211,28 @@ def run(use_padding_and_scaling=False, use_MNIST=False):
         x_test = np.swapaxes(x_test, 1, 3).astype(np.float32)
     else:
         image_folder = os.getcwd() + r"\data\images"
+        # x_train = np.load(image_folder)
+        # print(f"Shape of training data: {x_train.shape}")
+        # print(f"Data type: {type(x_train)}")
+        # data = x_train.astype(np.float64)
+        # data = 255 * data
+        # x_train = data.astype(np.uint8)
+        # random_image = np.random.randint(0, len(x_train))
+        # plt.imshow(x_train[random_image])
+        # plt.title(f"Training example #{random_image}")
+        # plt.axis('off')
+        # plt.show()
+
         dataset = CustomDataSet(root_dir=image_folder, transform=None)
 
         labels = get_labels()
+        unique_labels = set(labels)
 
         train_size = int(0.8 * len(dataset))
         test_size = len(dataset) - train_size
         train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-        trainloader = DataLoader(train_dataset, batch_size=91, shuffle=True)
-        testloader = DataLoader(test_dataset, batch_size=91, shuffle=True)
+        trainloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        testloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
         # Class definitions (indices 0-1000)
         with open(os.getcwd() + r'\data\labels.txt') as json_file:
@@ -219,14 +248,13 @@ def run(use_padding_and_scaling=False, use_MNIST=False):
 
     #%% Train the model
     start = time.time()
-    print(len(train_dataset))
     for epoch in range(0, 5):
 
         model.train()  # Put the network in train mode
         for i, (x_batch, y_batch) in enumerate(trainloader):
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
-
-            optimizer.zero_grad()  # Set all currenly stored gradients to zero
+            print()
+            optimizer.zero_grad()  # Set all currently stored gradients to zero
             y_pred = model(x_batch)
             loss = criterion(y_pred, y_batch)
             loss.backward()
@@ -257,4 +285,4 @@ def run(use_padding_and_scaling=False, use_MNIST=False):
 
 if __name__ == "__main__":
     path = os.getcwd() + r"\data"
-    run(use_padding_and_scaling=False)
+    run(use_padding_and_scaling=False, batch_size=4)
