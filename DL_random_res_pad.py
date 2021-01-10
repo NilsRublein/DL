@@ -10,7 +10,7 @@ import torch.optim as optim
 import numpy as np
 import os
 import pandas as pd
-from skimage import io, transform
+from skimage import io  # , transform
 import json
 import time
 
@@ -18,11 +18,14 @@ import time
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
+from torchvision.utils import make_grid
+from torchvision.utils import save_image
 from torchvision import datasets
 
 from sklearn.model_selection import train_test_split
 from art.utils import load_mnist
 
+import matplotlib.pyplot as plt
 # %%
 use_cuda = True
 
@@ -32,47 +35,53 @@ else:
     device = torch.device('cpu')
 
 print(f"{device=}")
-<<<<<<< HEAD
 
 
 # %% Step 0: Define the neural network model, return logits instead of activation in forward method
 
-=======
-
-#%% Step 0: Define the neural network model, return logits instead of activation in forward method
-
->>>>>>> Jeroen
 # NIPS defense.gi py: https://github.com/cihangxie/NIPS2017_adv_challenge_defense/blob/master/defense.py
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes):
         super(Net, self).__init__()
 
-        # Resize
-        # Pad
-<<<<<<< HEAD
-        self.conv_1 = nn.Conv2d(in_channels=299 * 299, out_channels=4, kernel_size=5, stride=1)
-=======
-        self.conv_1 = nn.Conv2d(in_channels=299*299, out_channels=4, kernel_size=5, stride=1)
->>>>>>> Jeroen
-        self.conv_2 = nn.Conv2d(in_channels=4, out_channels=10, kernel_size=5, stride=1)
-        self.fc_1 = nn.Linear(in_features=4 * 4 * 10, out_features=100)
-        self.fc_2 = nn.Linear(in_features=100, out_features=10)
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(64, 192, kernel_size=5, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(192, 384, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(384, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2)
+        )
+        self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
+        self.classifier = nn.Sequential(
+            nn.Dropout(),
+            nn.Linear(256 * 6 * 6, 4096),
+            nn.ReLU(inplace=True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096),
+            nn.ReLU(inplace=True),
+            nn.Linear(4096, num_classes),
+        )
 
     def forward(self, x):
-        x = F.relu(self.conv_1(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = F.relu(self.conv_2(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = x.view(-1, 4 * 4 * 10)
-        x = F.relu(self.fc_1(x))
-        x = self.fc_2(x)
+        x = self.features(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
         return x
 
 
 class CustomDataSet(Dataset):
-    '''
+    """
     Custom defined dataset. __getitem__ is used to retrieve one element from the dataset.
-    '''
+    """
 
     def __init__(self, root_dir, transform=None):
         self.root_dir = root_dir
@@ -80,6 +89,7 @@ class CustomDataSet(Dataset):
 
         self.all_imgs = os.listdir(root_dir)
         self.labels = get_labels()
+        self.count = 0
 
     def __len__(self):
         return len(self.all_imgs)
@@ -90,18 +100,36 @@ class CustomDataSet(Dataset):
         img_name = self.all_imgs[index]
         image = io.imread(self.root_dir + "\\" + img_name)
 
-        if self.transform:
+        if not self.transform:
+            new_size = get_resize()
+            max_padding = 331 - new_size
+            ax = plt.subplot(1, 2, 1)
+            plt.imshow(image)
+            self.transform = transforms.Compose([
+                # transforms.ToPILImage(),
+                # transforms.Resize(size=new_size),  # Default: nearest bilinear
+                # torchvision.transforms.Pad(padding=get_random_padding(max_padding=max_padding)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
             image = self.transform(image)
+            plt.imshow(image.permute(1, 2, 0))
+            plt.show()
+            self.count += 1
+            print(self.count)
+        else:
+            image = self.transform(image)
+
         return image, self.labels[img_name]
 
 
 def get_random_padding(max_padding=30):
-    '''
+    """
     Insert random amount on padding on each side.
     pad_left + pad_right = max_padding
     pad_top + pad_bottom = max_padding
     :return tuple
-    '''
+    """
     pad_left = int(torch.randint(high=max_padding, size=(1, 1)).item())
     pad_right = max_padding - pad_left
     pad_top = int(torch.randint(high=max_padding, size=(1, 1)).item())
@@ -111,10 +139,10 @@ def get_random_padding(max_padding=30):
 
 
 def get_labels():
-    '''
+    """
     Find label for each of the present images, specified in dev_dataset.csv
     :return: dict[image_name]: label
-    '''
+    """
     csv_path = os.getcwd() + r"\data\dev_dataset.csv"
     df = pd.read_csv(csv_path, usecols=['ImageId', 'TrueLabel', 'TargetClass'])
     present_images = os.listdir(path + r"\images")
@@ -124,23 +152,40 @@ def get_labels():
     return labels
 
 
-<<<<<<< HEAD
+def get_resize():
+    resize_shape = np.random.randint(299, 331)  # Check this values
+    return resize_shape
+
+
+def show_images(images, nmax=64):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.imshow(make_grid((images.detach()[:nmax]), nrow=8).permute(1, 2, 0))
+
+
+def show_batch(dl, nmax=64):
+    for images in dl:
+        show_images(images, nmax)
+        break
+
+
 # %% Step 1: Load the MNIST dataset
-=======
-#%% Step 1: Load the MNIST dataset
->>>>>>> Jeroen
 
 def run(use_padding_and_scaling=False, use_MNIST=False):
-    if use_padding_and_scaling:
-        transform = transforms.Compose([
-            transforms.Resize(size=1.0, interpolation=nn.Bilinear),
-            torchvision.transforms.Pad(padding=get_random_padding(max_padding=30)),
-            transforms.ToTensor(),
-        ])
-    else:
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-        ])
+    # if use_padding_and_scaling:
+    #     new_size = get_resize()
+    #     max_padding = 331 - new_size
+    #
+    #     transform = transforms.Compose([
+    #         # transforms.Resize(size=new_size),  # Default: nearest bilinear
+    #         # torchvision.transforms.Pad(padding=get_random_padding(max_padding=max_padding)),
+    #         # transforms.ToTensor(),
+    #     ])
+    # else:
+    #     transform = transforms.Compose([
+    #         transforms.ToTensor(),
+    #     ])
 
     if use_MNIST:
         (x_train, y_train), (x_test, y_test), min_pixel_value, max_pixel_value = load_mnist()
@@ -150,29 +195,15 @@ def run(use_padding_and_scaling=False, use_MNIST=False):
         x_test = np.swapaxes(x_test, 1, 3).astype(np.float32)
     else:
         image_folder = os.getcwd() + r"\data\images"
-        dataset = CustomDataSet(root_dir=image_folder, transform=transform)
+        dataset = CustomDataSet(root_dir=image_folder, transform=None)
 
         labels = get_labels()
-<<<<<<< HEAD
-=======
 
         train_size = int(0.8 * len(dataset))
         test_size = len(dataset) - train_size
         train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-        trainloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
-        testloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
-
-        # Class definitions (indices 0-1000)
-        with open(os.getcwd() + r'\data\labels.txt') as json_file:
-            labels = json.load(json_file)
-            classes = {int(key): val for key, val in labels.items()}
->>>>>>> Jeroen
-
-        train_size = int(0.8 * len(dataset))
-        test_size = len(dataset) - train_size
-        train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-        trainloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
-        testloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
+        trainloader = DataLoader(train_dataset, batch_size=91, shuffle=True)
+        testloader = DataLoader(test_dataset, batch_size=91, shuffle=True)
 
         # Class definitions (indices 0-1000)
         with open(os.getcwd() + r'\data\labels.txt') as json_file:
@@ -180,16 +211,15 @@ def run(use_padding_and_scaling=False, use_MNIST=False):
             classes = {int(key): val for key, val in labels.items()}
 
     # %% Step 2: Create the model
-    model = Net()
+    model = Net(num_classes=1000)
 
     # Step 2a: Define the loss function and the optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.01)
 
-    '''
     #%% Train the model
     start = time.time()
-
+    print(len(train_dataset))
     for epoch in range(0, 5):
 
         model.train()  # Put the network in train mode
@@ -210,10 +240,9 @@ def run(use_padding_and_scaling=False, use_MNIST=False):
             # Show progress every 20 batches
             if not i % 20:
                 print(
-                    f'epoch: {epoch}, time: {elapsed:.3f}s, loss: {loss.item():.3f}, train accuracy: {correct / 1:.3f}')
+                    f'epoch: {epoch}, time: {elapsed:.3f}s, loss: {loss.item():.3f}, train accuracy: {correct / 1:.5f}')
 
-            correct_total = 0
-
+        correct_total = 0
         model.eval()  # Put the network in eval mode
         for i, (x_batch, y_batch) in enumerate(testloader):
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
@@ -222,9 +251,8 @@ def run(use_padding_and_scaling=False, use_MNIST=False):
             y_pred_max = torch.argmax(y_pred, dim=1)
 
             correct_total += torch.sum(torch.eq(y_pred_max, y_batch)).item()
-
-        print(f'Accuracy on the test set: {correct_total / len(test_dataset):.3f}')
-    '''
+        print(len(test_dataset))
+        print(f'Accuracy on the test set: {correct_total / len(test_dataset):.5f}')
 
 
 if __name__ == "__main__":
