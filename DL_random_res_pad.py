@@ -3,54 +3,337 @@
 Random resizing and padding as input for a NN
 """
 
+import json
+import os
+import time
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-import numpy as np
+# Cannot be installed through Pipenv. Use pip install --no-deps torchvision instead.
+import torchvision
+import torchvision.transforms as transforms
+from skimage import io  # , transform
+from torch.utils.data import Dataset, DataLoader
 
-from art.utils import load_mnist
+from art.attacks.evasion import FastGradientMethod, BasicIterativeMethod, ProjectedGradientDescent, Wasserstein
+from art.estimators.classification import PyTorchClassifier
 
+import ctypes
+ctypes.cdll.LoadLibrary('caffe2_nvrtc.dll')
 
-#%% Step 0: Define the neural network model, return logits instead of activation in forward method
+# %%
+use_cuda = True
 
+if use_cuda and torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
 
+print(f"{device=}")
+
+import ctypes
+ctypes.cdll.LoadLibrary('caffe2_nvrtc.dll')
+
+# %% Step 0: Define the neural network model, return logits instead of activation in forward method
+
+# NIPS defense.gi py: https://github.com/cihangxie/NIPS2017_adv_challenge_defense/blob/master/defense.py
+
+min_resize = 310
+max_resize = 331
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes):
         super(Net, self).__init__()
-        
-        #resize 
-        #pad
-        self.conv_1 = nn.Conv2d(in_channels=1, out_channels=4, kernel_size=5, stride=1)
-        self.conv_2 = nn.Conv2d(in_channels=4, out_channels=10, kernel_size=5, stride=1)
-        self.fc_1 = nn.Linear(in_features=4 * 4 * 10, out_features=100)
-        self.fc_2 = nn.Linear(in_features=100, out_features=10)
+
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(64, 192, kernel_size=5, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(192, 384, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(384, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2)
+        )
+        self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
+        self.classifier = nn.Sequential(
+            nn.Dropout(),
+            nn.Linear(256 * 6 * 6, 4096),
+            nn.ReLU(inplace=True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096),
+            nn.ReLU(inplace=True),
+            nn.Linear(4096, num_classes),
+        )
 
     def forward(self, x):
-        x = F.relu(self.conv_1(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = F.relu(self.conv_2(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = x.view(-1, 4 * 4 * 10)
-        x = F.relu(self.fc_1(x))
-        x = self.fc_2(x)
+        x = self.features(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
         return x
 
 
-#%% Step 1: Load the MNIST dataset
+class CustomDataSet(Dataset):
+    """
+    Custom defined dataset. __getitem__ is used to retrieve one element from the dataset.
+    """
 
-(x_train, y_train), (x_test, y_test), min_pixel_value, max_pixel_value = load_mnist()
+    def __init__(self, root_dir, use_padding_and_scaling):
+        self.root_dir = root_dir
+        self.use_padding_and_scaling = use_padding_and_scaling
+        self.all_imgs = os.listdir(root_dir)
+        self.labels = get_labels()
+        self.count = 0
 
-# Step 1a: Swap axes to PyTorch's NCHW format
+    def __len__(self):
+        return len(self.all_imgs)
 
-x_train = np.swapaxes(x_train, 1, 3).astype(np.float32)
-x_test = np.swapaxes(x_test, 1, 3).astype(np.float32)
+    def __getitem__(self, index):
+        if torch.is_tensor(index):
+            index = index.tolist()
+        img_name = self.all_imgs[index]
+        image = io.imread(self.root_dir + "\\" + img_name)
 
-#%% Step 2: Create the model
+        new_size = get_resize(min_resize, max_resize)
 
-model = Net()
+        if self.use_padding_and_scaling:
+            self.transform = transforms.Compose([
+                transforms.ToPILImage(),
+                transforms.Resize(size=new_size),  # Default: nearest bilinear
+                torchvision.transforms.Pad(padding=get_random_padding(new_size, max_resize)),
+                transforms.ToTensor(),
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        else:
+            self.transform = transforms.Compose([
+                transforms.ToPILImage(),
+                transforms.ToTensor(),
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        image = self.transform(image)
+        # plt.imshow(image.permute(1, 2, 0))
+        # plt.show()
 
-# Step 2a: Define the loss function and the optimizer
+        image = self.transform(image)
 
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.01)
+        return image, self.labels[img_name]
+
+
+def get_random_padding(new_size, max_resize):
+    """
+    Insert random amount on padding on each side.
+    pad_left + pad_right = max_padding
+    pad_top + pad_bottom = max_padding
+    :return tuple
+    """
+    max_pad = max_resize - new_size
+
+    pad_left = np.random.randint(0, max_pad)
+    pad_right = max_pad - pad_left
+
+    pad_top = np.random.randint(0, max_pad)
+    pad_bottom = max_pad - pad_top
+
+    LRTB = (pad_left, pad_top, pad_right, pad_bottom)
+    return LRTB
+
+
+def get_labels():
+    """
+    Find label for each of the present images, specified in dev_dataset.csv
+    :return: dict[image_name]: label
+    """
+    csv_path = os.getcwd() + r"\data\dev_dataset.csv"
+    df = pd.read_csv(csv_path, usecols=['ImageId', 'TrueLabel', 'TargetClass'])
+    present_images = os.listdir(path + r"\images")
+    labels = {}
+    for image in present_images:
+        labels[image] = int(df.loc[df['ImageId'] == image[:-4]]['TrueLabel'].iloc[0])-1
+    return labels
+
+
+def get_resize(min=299, max=331):
+    resize_shape = np.random.randint(min, max)  # Check this values
+    return resize_shape
+
+
+def show_sample(dataset, labels, n=4):
+    fig = plt.figure()
+
+    for i in range(len(dataset)):
+        image = dataset[i].permute(1, 2, 0)
+
+        ax = plt.subplot(1, n, i + 1)
+        plt.tight_layout()
+        label = labels[i].item()
+        label_text = classes[label]
+
+        try:
+            comma = label_text.index(',')
+            label_text = label_text[:comma]
+        except ValueError:
+            pass
+
+        ax.set_title(f'{label_text} ({label})')
+        ax.axis('off')
+        plt.imshow(image.cpu())
+        if i == len(dataset)-1:
+            plt.show()
+            break
+        
+
+
+
+
+
+
+
+
+# %% Step 1: Load the MNIST dataset
+
+def run(use_padding_and_scaling, batch_size):
+
+    image_folder = os.getcwd() + r"\data\images"
+    labels = get_labels()
+    
+    
+    # Apply attack first here, need to init model before that though here as well 
+    
+
+    dataset = CustomDataSet(root_dir=image_folder, use_padding_and_scaling=use_padding_and_scaling)
+    train_size = int(0.8 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+    trainloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    testloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+
+    # Class definitions (indices 0-1000)
+    with open(os.getcwd() + r'\data\labels.txt') as json_file:
+        labels = json.load(json_file)
+        global classes
+        classes = {int(key): val for key, val in labels.items()}
+
+    # %% Step 2: Create the model
+    # model = Net(num_classes=1000)
+    # model = torch.hub.load('pytorch/vision:v0.6.0', 'inception_v3', pretrained=True)
+    model = torchvision.models.inception_v3(pretrained=True, progress=False, transform_input=True).to(device)  # Changed proress to False, gave me some weird error when it was true
+
+    # Step 2a: Define the loss function and the optimizerTrue
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.01)
+
+    #%% Train the model
+    start = time.time()
+    # for epoch in range(0, 5):
+    #
+    #     plt.ion()
+    #     losses = []
+    #     loss_plot = plt.plot(0, 0)[0]
+    #     model.train()  # Put the network in train mode
+    #     for i, (x_batch, y_batch) in enumerate(trainloader):
+    #         x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
+    #         # show_sample(x_batch, y_batch)
+    #         optimizer.zero_grad()  # Set all currently stored gradients to zero
+    #         y_pred = model(x_batch)
+    #         loss = criterion(y_pred, y_batch)
+    #         loss.backward()
+    #         optimizer.step()
+    #
+    #         # Compute relevant metrics
+    #         y_pred_max = torch.argmax(y_pred, dim=1)  # Get the labels with highest output probability
+    #         correct = torch.sum(torch.eq(y_pred_max, y_batch)).item()  # Count how many are equal to the true labels
+    #         elapsed = time.time() - start  # Keep track of how much time has elapsed
+    #
+    #         losses.append(loss.item())
+    #         loss_plot.set_xdata(len(losses))
+    #         loss_plot.set_ydata(losses)
+    #         plt.draw()
+    #         plt.pause(0.01)
+    #
+    #         # Show progress every 20 batches
+    #         if not i % 20:
+    #             print(
+    #                 f'epoch: {epoch}, time: {elapsed:.3f}s, loss: {loss.item():.3f}, train accuracy: {correct / 1:.5f}')
+    #
+
+
+    print("Adversarial Attack")
+
+
+    # ART PytorchClassifier: https://adversarial-robustness-toolbox.readthedocs.io/en/stable/modules/estimators/classification.html?highlight=PyTorchClassifier#art.estimators.classification.PyTorchClassifier
+    classifier = PyTorchClassifier(
+    model=model,
+    #clip_values=(min_pixel_value, max_pixel_value), #This is optional
+    loss=criterion,
+    optimizer=optimizer,
+    input_shape=(3, max_resize, max_resize),
+    nb_classes=1000, # Maybe 999?
+    )
+    
+    x_train = train_dataset.dataset.all_imgs
+    y_train = train_dataset.dataset.labels
+    x_test = test_dataset.dataset.all_imgs
+    y_test = test_dataset.dataset.labels
+    
+    
+    #%% Step 4: Train the ART classifier
+    classifier.fit(x_train, y_train, batch_size=4, nb_epochs=5) # Is this needed?? Our net is already trained
+
+    #%% Step 5: Evaluate the ART classifier on benign test examples
+
+    predictions = classifier.predict(x_test) # Will this still work if we dont fit?
+    accuracy = np.sum(np.argmax(predictions, axis=1) == np.argmax(y_test, axis=1)) / len(y_test)
+    print("Accuracy on benign test examples: {}%".format(accuracy * 100))
+    
+    def eval_attack(attack):
+        # Step 6: Generate adversarial test examples
+        x_test_adv = attack.generate(x=x_test)
+        
+        # Step 7: Evaluate the ART classifier on adversarial test examples  
+        predictions = classifier.predict(x_test_adv)
+        accuracy = np.sum(np.argmax(predictions, axis=1) == np.argmax(y_test, axis=1)) / len(y_test)
+        print("Accuracy on adversarial test examples with: {}%".format(accuracy * 100))
+        return accuracy, x_test_adv
+
+    #%% FGSM
+    FGSM, x_test_adv = FastGradientMethod(estimator=classifier, eps=0.2)
+    acc_FGSM = eval_attack(FGSM)
+
+
+    # To use the attacked images in this evaluation function we need first need to merge x_test_adv and y test in single testset and load that via the dataloader
+    # .......
+    # Note: right now we are first resizing and adding padding and then we attack the images, this doesnt really make sense, does it?
+    
+    
+    """
+        correct_total = 0
+    total_tested = 0
+    model.eval()  # Put the network in eval mode
+    for i, (x_batch, y_batch) in enumerate(testloader):
+        x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
+        # show_sample(x_batch, y_batch)
+        y_pred = model(x_batch)
+        y_pred_max = torch.argmax(y_pred, dim=1)
+
+        total_tested += len(y_batch)
+        correct_total += torch.sum(torch.eq(y_pred_max, y_batch)).item()
+        print(f"Correct: {correct_total}/{total_tested} ({correct_total/total_tested*100:.2f}%)")
+
+    print(f'Accuracy on the test set: {correct_total / len(test_dataset):.5f}')
+    """
+
+
+
+
+if __name__ == "__main__":
+    path = os.getcwd() + r"\data"
+    run(use_padding_and_scaling=True, batch_size=4)
