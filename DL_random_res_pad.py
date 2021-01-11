@@ -29,10 +29,15 @@ else:
 
 print(f"{device=}")
 
+import ctypes
+ctypes.cdll.LoadLibrary('caffe2_nvrtc.dll')
 
 # %% Step 0: Define the neural network model, return logits instead of activation in forward method
 
 # NIPS defense.gi py: https://github.com/cihangxie/NIPS2017_adv_challenge_defense/blob/master/defense.py
+
+min_resize = 310
+max_resize = 331
 class Net(nn.Module):
     def __init__(self, num_classes):
         super(Net, self).__init__()
@@ -92,19 +97,19 @@ class CustomDataSet(Dataset):
         img_name = self.all_imgs[index]
         image = io.imread(self.root_dir + "\\" + img_name)
 
-        new_size = get_resize()
-        plt.imshow(image)
+        new_size = get_resize(min_resize, max_resize)
 
         if self.use_padding_and_scaling:
             self.transform = transforms.Compose([
                 transforms.ToPILImage(),
                 transforms.Resize(size=new_size),  # Default: nearest bilinear
-                torchvision.transforms.Pad(padding=get_random_padding(new_size)),
+                torchvision.transforms.Pad(padding=get_random_padding(new_size, max_resize)),
                 transforms.ToTensor(),
                 # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
         else:
             self.transform = transforms.Compose([
+                transforms.ToPILImage(),
                 transforms.ToTensor(),
                 # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
@@ -117,14 +122,14 @@ class CustomDataSet(Dataset):
         return image, self.labels[img_name]
 
 
-def get_random_padding(new_size):
+def get_random_padding(new_size, max_resize):
     """
     Insert random amount on padding on each side.
     pad_left + pad_right = max_padding
     pad_top + pad_bottom = max_padding
     :return tuple
     """
-    max_pad = 331 - new_size
+    max_pad = max_resize - new_size
 
     pad_left = np.random.randint(0, max_pad)
     pad_right = max_pad - pad_left
@@ -150,8 +155,8 @@ def get_labels():
     return labels
 
 
-def get_resize():
-    resize_shape = np.random.randint(299, 331)  # Check this values
+def get_resize(min=299, max=331):
+    resize_shape = np.random.randint(min, max)  # Check this values
     return resize_shape
 
 
@@ -174,7 +179,7 @@ def show_sample(dataset, labels, n=4):
 
         ax.set_title(f'{label_text} ({label})')
         ax.axis('off')
-        plt.imshow(image)
+        plt.imshow(image.cpu())
         if i == len(dataset)-1:
             plt.show()
             break
@@ -182,7 +187,7 @@ def show_sample(dataset, labels, n=4):
 
 # %% Step 1: Load the MNIST dataset
 
-def run(use_padding_and_scaling, batch_size=16):
+def run(use_padding_and_scaling, batch_size):
 
     image_folder = os.getcwd() + r"\data\images"
     labels = get_labels()
@@ -201,47 +206,62 @@ def run(use_padding_and_scaling, batch_size=16):
         classes = {int(key): val for key, val in labels.items()}
 
     # %% Step 2: Create the model
-    model = Net(num_classes=1000)
+    # model = Net(num_classes=1000)
+    # model = torch.hub.load('pytorch/vision:v0.6.0', 'inception_v3', pretrained=True)
+    model = torchvision.models.inception_v3(pretrained=True, progress=True, transform_input=True).to(device)
 
-    # Step 2a: Define the loss function and the optimizer
+    # Step 2a: Define the loss function and the optimizerTrue
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.01)
 
     #%% Train the model
     start = time.time()
-    for epoch in range(0, 5):
+    # for epoch in range(0, 5):
+    #
+    #     plt.ion()
+    #     losses = []
+    #     loss_plot = plt.plot(0, 0)[0]
+    #     model.train()  # Put the network in train mode
+    #     for i, (x_batch, y_batch) in enumerate(trainloader):
+    #         x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
+    #         # show_sample(x_batch, y_batch)
+    #         optimizer.zero_grad()  # Set all currently stored gradients to zero
+    #         y_pred = model(x_batch)
+    #         loss = criterion(y_pred, y_batch)
+    #         loss.backward()
+    #         optimizer.step()
+    #
+    #         # Compute relevant metrics
+    #         y_pred_max = torch.argmax(y_pred, dim=1)  # Get the labels with highest output probability
+    #         correct = torch.sum(torch.eq(y_pred_max, y_batch)).item()  # Count how many are equal to the true labels
+    #         elapsed = time.time() - start  # Keep track of how much time has elapsed
+    #
+    #         losses.append(loss.item())
+    #         loss_plot.set_xdata(len(losses))
+    #         loss_plot.set_ydata(losses)
+    #         plt.draw()
+    #         plt.pause(0.01)
+    #
+    #         # Show progress every 20 batches
+    #         if not i % 20:
+    #             print(
+    #                 f'epoch: {epoch}, time: {elapsed:.3f}s, loss: {loss.item():.3f}, train accuracy: {correct / 1:.5f}')
+    #
 
-        model.train()  # Put the network in train mode
-        for i, (x_batch, y_batch) in enumerate(trainloader):
-            x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
-            show_sample(x_batch, y_batch)
-            optimizer.zero_grad()  # Set all currently stored gradients to zero
-            y_pred = model(x_batch)
-            loss = criterion(y_pred, y_batch)
-            loss.backward()
-            optimizer.step()
+    correct_total = 0
+    total_tested = 0
+    model.eval()  # Put the network in eval mode
+    for i, (x_batch, y_batch) in enumerate(testloader):
+        x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
+        # show_sample(x_batch, y_batch)
+        y_pred = model(x_batch)
+        y_pred_max = torch.argmax(y_pred, dim=1)
 
-            # Compute relevant metrics
-            y_pred_max = torch.argmax(y_pred, dim=1)  # Get the labels with highest output probability
-            correct = torch.sum(torch.eq(y_pred_max, y_batch)).item()  # Count how many are equal to the true labels
-            elapsed = time.time() - start  # Keep track of how much time has elapsed
+        total_tested += len(y_batch)
+        correct_total += torch.sum(torch.eq(y_pred_max, y_batch)).item()
+        print(f"Correct: {correct_total}/{total_tested} ({correct_total/total_tested*100:.2f}%)")
 
-            # Show progress every 20 batches
-            if not i % 20:
-                print(
-                    f'epoch: {epoch}, time: {elapsed:.3f}s, loss: {loss.item():.3f}, train accuracy: {correct / 1:.5f}')
-
-        correct_total = 0
-        model.eval()  # Put the network in eval mode
-        for i, (x_batch, y_batch) in enumerate(testloader):
-            x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
-
-            y_pred = model(x_batch)
-            y_pred_max = torch.argmax(y_pred, dim=1)
-
-            correct_total += torch.sum(torch.eq(y_pred_max, y_batch)).item()
-        print(len(test_dataset))
-        print(f'Accuracy on the test set: {correct_total / len(test_dataset):.5f}')
+    print(f'Accuracy on the test set: {correct_total / len(test_dataset):.5f}')
 
 
 if __name__ == "__main__":
