@@ -36,8 +36,7 @@ ctypes.cdll.LoadLibrary('caffe2_nvrtc.dll')
 
 # NIPS defense.gi py: https://github.com/cihangxie/NIPS2017_adv_challenge_defense/blob/master/defense.py
 
-min_resize = 310
-max_resize = 331
+
 class Net(nn.Module):
     def __init__(self, num_classes):
         super(Net, self).__init__()
@@ -81,12 +80,14 @@ class CustomDataSet(Dataset):
     Custom defined dataset. __getitem__ is used to retrieve one element from the dataset.
     """
 
-    def __init__(self, root_dir, use_padding_and_scaling):
+    def __init__(self, min_resize, max_resize, root_dir, use_padding_and_scaling):
         self.root_dir = root_dir
         self.use_padding_and_scaling = use_padding_and_scaling
         self.all_imgs = os.listdir(root_dir)
         self.labels = get_labels()
         self.count = 0
+        self.min_resize = min_resize
+        self.max_resize = max_resize
 
     def __len__(self):
         return len(self.all_imgs)
@@ -97,13 +98,13 @@ class CustomDataSet(Dataset):
         img_name = self.all_imgs[index]
         image = io.imread(self.root_dir + "\\" + img_name)
 
-        new_size = get_resize(min_resize, max_resize)
+        new_size = get_resize(self.min_resize, self.max_resize)
 
         if self.use_padding_and_scaling:
             self.transform = transforms.Compose([
                 transforms.ToPILImage(),
                 transforms.Resize(size=new_size),  # Default: nearest bilinear
-                torchvision.transforms.Pad(padding=get_random_padding(new_size, max_resize)),
+                torchvision.transforms.Pad(padding=get_random_padding(new_size, self.max_resize)),
                 transforms.ToTensor(),
                 # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
@@ -187,12 +188,12 @@ def show_sample(dataset, labels, n=4):
 
 # %% Step 1: Load the MNIST dataset
 
-def run(use_padding_and_scaling, batch_size):
+def run(min_resize, max_resize, use_padding_and_scaling, batch_size):
 
     image_folder = os.getcwd() + r"\data\images"
     labels = get_labels()
 
-    dataset = CustomDataSet(root_dir=image_folder, use_padding_and_scaling=use_padding_and_scaling)
+    dataset = CustomDataSet(min_resize, max_resize, root_dir=image_folder, use_padding_and_scaling=use_padding_and_scaling)
     train_size = int(0.8 * len(dataset))
     test_size = len(dataset) - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
@@ -259,11 +260,28 @@ def run(use_padding_and_scaling, batch_size):
 
         total_tested += len(y_batch)
         correct_total += torch.sum(torch.eq(y_pred_max, y_batch)).item()
-        print(f"Correct: {correct_total}/{total_tested} ({correct_total/total_tested*100:.2f}%)")
+        # print(f"Correct: {correct_total}/{total_tested} ({correct_total/total_tested*100:.2f}%)")
 
-    print(f'Accuracy on the test set: {correct_total / len(test_dataset):.5f}')
-
+    # print(f'Accuracy on the test set: {correct_total / len(test_dataset):.5f}')
+    return correct_total / len(test_dataset)
 
 if __name__ == "__main__":
     path = os.getcwd() + r"\data"
-    run(use_padding_and_scaling=True, batch_size=4)
+    min_resize = 299
+    max_resize = 349 + 1
+    step = 10
+    ranges=[]
+    # ranges = [(299, 309), (299, 319), (299, 329), (299, 339), (299, 349)\
+    #                       (309, 319), (309, 329), (309, 339), (309, 349)\
+    #                                   (319, 329), (319, 339), (319, 349)\
+    #                                               (329, 339), (329, 349)\
+    #                                                           (339, 349)]
+
+    for i in range(min_resize, max_resize, step):
+        for j in range(i, max_resize, step):
+            if i == j: continue
+            ranges.append((i,j))
+
+    for i, (min, max) in enumerate(ranges):
+        acc = run(min_resize, max_resize, use_padding_and_scaling=True, batch_size=4)
+        print(f"[{i+1}/{len(ranges)}] - min: {min}, max: {max}, accuracy: {acc:.3f}")
