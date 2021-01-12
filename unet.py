@@ -97,6 +97,6 @@ class UNet(nn.Module):
         fused4 = fuse(up3, down64)
         up4 = self.up64(fused4)
         output = self.up_final(up4)
-        return output
+        return output + x
 
 
