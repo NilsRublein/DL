@@ -19,6 +19,11 @@ import torchvision.transforms as transforms
 from skimage import io  # , transform
 from torch.utils.data import Dataset, DataLoader
 
+from art.attacks.evasion import FastGradientMethod, BasicIterativeMethod, ProjectedGradientDescent, Wasserstein
+from art.estimators.classification import PyTorchClassifier
+from attack import AttackWrapper
+
+from PIL import Image
 # %%
 use_cuda = True
 
@@ -248,20 +253,33 @@ def run(use_padding_and_scaling, batch_size):
     #                 f'epoch: {epoch}, time: {elapsed:.3f}s, loss: {loss.item():.3f}, train accuracy: {correct / 1:.5f}')
     #
 
-    correct_total = 0
-    total_tested = 0
-    model.eval()  # Put the network in eval mode
-    for i, (x_batch, y_batch) in enumerate(testloader):
-        x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
-        # show_sample(x_batch, y_batch)
-        y_pred = model(x_batch)
-        y_pred_max = torch.argmax(y_pred, dim=1)
+    if False:
+        correct_total = 0
+        total_tested = 0
+        model.eval()  # Put the network in eval mode
+        for i, (x_batch, y_batch) in enumerate(testloader):
+            x_batch, y_batch = x_batch.to(device), y_batch.to(device)  # Move the data to the device that is used
+            # show_sample(x_batch, y_batch)
+            y_pred = model(x_batch)
+            y_pred_max = torch.argmax(y_pred, dim=1)
 
-        total_tested += len(y_batch)
-        correct_total += torch.sum(torch.eq(y_pred_max, y_batch)).item()
-        print(f"Correct: {correct_total}/{total_tested} ({correct_total/total_tested*100:.2f}%)")
+            total_tested += len(y_batch)
+            correct_total += torch.sum(torch.eq(y_pred_max, y_batch)).item()
+            print(f"Correct: {correct_total}/{total_tested} ({correct_total/total_tested*100:.2f}%)")
 
-    print(f'Accuracy on the test set: {correct_total / len(test_dataset):.5f}')
+        print(f'Accuracy on the test set: {correct_total / len(test_dataset):.5f}')
+
+    #%% Attack section
+
+    all_imgs_loaded = []
+    for img in train_dataset.dataset.all_imgs:
+        all_imgs_loaded.append(np.asarray(Image.open(f"{path}\\images\\{img}")))
+
+    attack = AttackWrapper(model, all_imgs_loaded, criterion, optimizer, min_resize, max_resize)
+    FGSM = FastGradientMethod(estimator=attack.classifier, eps=0.2)
+
+    acc_FGSM = attack.eval_attack(FGSM)
+    print(f"FGSM Accuracy: {acc_FGSM}")
 
 
 if __name__ == "__main__":
