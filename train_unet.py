@@ -27,7 +27,7 @@ import torchvision.transforms as transforms
 from torchvision.utils import save_image, make_grid
 
 # Choose which device to use
-use_cuda = False
+use_cuda = True
 
 if use_cuda and torch.cuda.is_available():
   device = torch.device('cuda')
@@ -118,6 +118,7 @@ def imshow(img, title):
     plt.show()
 
 #%% Testing
+"""
 adv_name = "bruh-Cat-Dog-12342134214.png#FGSM.png"
 print(adv_name.rindex('-'))
 print(adv_name[adv_name.rindex('-')+1:])
@@ -126,6 +127,9 @@ print(name.group(1))
 
 aa = name.group(1)
 bb = aa[aa.rindex('-') +1:]
+"""
+
+
 
 #%%
 adv_image_folder = os.getcwd() + r"\data\atk_test_imgs" 
@@ -145,7 +149,7 @@ my_iter = iter(trainloader)
 
 # This needs a batchsize of 1, to actually show one image, otherwise it will make a grid of batch_size elements. 
 # Are there also torchvision functions to just display one image of a dataloader with a batch_size > 1?
-adv_images, true_images,label = next(my_iter)
+#adv_images, true_images,label = next(my_iter)
 adv_images, true_images = next(my_iter)
 
 print("Adv Image & Label")
@@ -184,8 +188,8 @@ class AE(nn.Module):
         return reconstructed
 
 #%% Build unet
-input_shape = w * h * c
-#input_shape = [c,w,h]
+#input_shape = w * h * c # For AE
+input_shape = c # RGB
 output_shape = input_shape
 model = UNet(input_shape,output_shape).to(device) #  is this correct?
 #model = AE(input_shape=input_shape).to(device)
@@ -217,19 +221,20 @@ for epoch in range(1, epochs+1):
     epoch_loss = 0
     
     # For every minibatch in trainloader, get the noisy and true images
-    #for i, (noisy_imgs, true_imgs, labels) in enumerate(trainloader): 
-    for noisy_imgs, true_imgs in trainloader: 
+    
+    for i, (noisy_imgs, true_imgs) in enumerate(trainloader): 
         noisy_imgs, true_imgs = noisy_imgs.to(device), true_imgs.to(device)  # Move the data to the device that is used
 
-        # Set dL/dU, dL/dV, dL/dW to be filled with zeros
+        # Set dL/dU, dL/dV, dL/dW to be filled with7 zeros
         optimizer.zero_grad()
 
         # forward the minibatch through the net  
-        denoised_imgs = model(noisy_imgs.view(-1, w * h * c)) #CHECK IF THIS IS STILL CORRECT
-        #denoised_imgs = model(noisy_imgs.view(c, w, h))
+        #denoised_imgs = model(noisy_imgs.view(-1, w * h * c)) #CHECK IF THIS IS STILL CORRECT
+        denoised_imgs = model(noisy_imgs)
         
         # Compute the average of the losses of the data points in the minibatch
-        loss = criterion(denoised_imgs, true_imgs.view(-1, w * h * c)) 
+        #loss = criterion(denoised_imgs, true_imgs.view(-1, w * h * c)) # For AE
+        loss = criterion(denoised_imgs, true_imgs) 
         epoch_loss += loss.item()
 
         # backward pass to compute dL/dU, dL/dV and dL/dW    
@@ -263,3 +268,10 @@ for i, (noisy_imgs, true_imgs, labels) in enumerate(trainloader):
     label = labels[0]
     
     save_image(noisy_imgs, r"./data/denoised_images/" + label + ".png")
+    
+#%%
+x = 1 
+if x: 
+    print( 'if x' )
+if x is not None: 
+    print ('if x is not None')
