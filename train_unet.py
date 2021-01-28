@@ -61,6 +61,7 @@ class CustomDataSet():
             index = index.tolist()
         
         adv_img_name = self.all_adv_imgs[index]
+        print(adv_img_name)
         true_img_name = get_true_img_name(adv_img_name)
         
         adv_img = io.imread(self.adv_root_dir + "\\" + adv_img_name)
@@ -81,7 +82,7 @@ class CustomDataSet():
             adv_img = self.transform(adv_img)
             true_img = self.transform(true_img)
 
-        return adv_img, true_img #, self.labels[adv_img_name]
+        return adv_img, true_img, adv_img_name #, self.labels[adv_img_name]
     
 def get_labels():
     """
@@ -150,14 +151,16 @@ my_iter = iter(trainloader)
 # This needs a batchsize of 1, to actually show one image, otherwise it will make a grid of batch_size elements. 
 # Are there also torchvision functions to just display one image of a dataloader with a batch_size > 1?
 #adv_images, true_images,label = next(my_iter)
-adv_images, true_images = next(my_iter)
+adv_images, true_images, img_name = next(my_iter)
 
 print("Adv Image & Label")
 #imshow(make_grid(adv_images, normalize=True), labels[0])
 
 print("True Image & Label")
 #imshow(make_grid(true_images, normalize=True), labels[0])
+#%%
 
+new_name = img_name.replace('.png','')
 
 #%%
 class AE(nn.Module):
@@ -222,7 +225,7 @@ for epoch in range(1, epochs+1):
     
     # For every minibatch in trainloader, get the noisy and true images
     
-    for i, (noisy_imgs, true_imgs) in enumerate(trainloader): 
+    for i, (noisy_imgs, true_imgs, name) in enumerate(trainloader): 
         noisy_imgs, true_imgs = noisy_imgs.to(device), true_imgs.to(device)  # Move the data to the device that is used
 
         # Set dL/dU, dL/dV, dL/dW to be filled with7 zeros
@@ -243,6 +246,9 @@ for epoch in range(1, epochs+1):
         # do one step of stochastic gradient descent: U=U-lr(dL/dU), V=V-lr(dL/dU), ...
         optimizer.step()
         
+        if epoch == epochs:
+            a = 1 # save denoised image 
+        
         
     
     # compute the epoch training loss
@@ -256,22 +262,8 @@ print("Time elapsed in minutes: ", (end - start)/60)
 
 #%% Save denoised images
 
-# Make sure this actuall handles all images / one img at the time
-# make grid ...
-
-# Worst case, I can reload the dataloader with batch_size 1
-
-for i, (noisy_imgs, true_imgs, labels) in enumerate(trainloader): 
-    noisy_imgs, true_imgs = noisy_imgs.to(device), true_imgs.to(device)
-    enoised_imgs = model(noisy_imgs.view(-1, w * h * c))
+def save_the_img(denoised_imgs, name):
     
-    label = labels[0]
-    
-    save_image(noisy_imgs, r"./data/denoised_images/" + label + ".png")
+    save_image(noisy_imgs, r"./data/denoised_images/" + name + ".png")
     
 #%%
-x = 1 
-if x: 
-    print( 'if x' )
-if x is not None: 
-    print ('if x is not None')
