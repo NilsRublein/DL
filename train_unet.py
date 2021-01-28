@@ -61,7 +61,7 @@ class CustomDataSet():
             index = index.tolist()
         
         adv_img_name = self.all_adv_imgs[index]
-        print(adv_img_name)
+
         true_img_name = get_true_img_name(adv_img_name)
         
         adv_img = io.imread(self.adv_root_dir + "\\" + adv_img_name)
@@ -117,19 +117,14 @@ def imshow(img, title):
     plt.imshow(np.transpose(npimg,(1,2,0)))
     plt.title(title)
     plt.show()
+    
 
-#%% Testing
-"""
-adv_name = "bruh-Cat-Dog-12342134214.png#FGSM.png"
-print(adv_name.rindex('-'))
-print(adv_name[adv_name.rindex('-')+1:])
-name = re.search('-(.*)#', adv_name)       
-print(name.group(1))
-
-aa = name.group(1)
-bb = aa[aa.rindex('-') +1:]
-"""
-
+def save_the_img(denoised_imgs, name):
+    '''
+    Takes in a tensor image and saves it as png at the specified location
+    '''
+    name = name.replace('.png','') # Get rid of all the '.pngs'
+    save_image(noisy_imgs, r"./data/denoised_images/denoised" +"#" + name + ".png")
 
 
 #%%
@@ -138,9 +133,8 @@ true_image_folder = os.getcwd() + r"\data\imagenet_all_images"
 
 dataset = CustomDataSet(adv_root_dir=adv_image_folder, true_root_dir=true_image_folder, transform=None)
 
-batch_size = 1 # Check if this is a good value
+batch_size = 5 # Check if this is a good value
 w, h, c = 299, 299, 3 # Width, height, channels
-
 trainloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 
@@ -158,44 +152,11 @@ print("Adv Image & Label")
 
 print("True Image & Label")
 #imshow(make_grid(true_images, normalize=True), labels[0])
-#%%
-
-new_name = img_name.replace('.png','')
-
-#%%
-class AE(nn.Module):
-    def __init__(self, **kwargs):
-        super().__init__()
-        self.encoder_hidden_layer = nn.Linear(
-            in_features=kwargs["input_shape"], out_features=128
-        )
-        self.encoder_output_layer = nn.Linear(
-            in_features=128, out_features=128
-        )
-        self.decoder_hidden_layer = nn.Linear(
-            in_features=128, out_features=128
-        )
-        self.decoder_output_layer = nn.Linear(
-            in_features=128, out_features=kwargs["input_shape"]
-        )
-
-    def forward(self, features):
-        activation = self.encoder_hidden_layer(features)
-        activation = torch.relu(activation)
-        code = self.encoder_output_layer(activation)
-        code = torch.relu(code)
-        activation = self.decoder_hidden_layer(code)
-        activation = torch.relu(activation)
-        activation = self.decoder_output_layer(activation)
-        reconstructed = torch.relu(activation)
-        return reconstructed
 
 #%% Build unet
-#input_shape = w * h * c # For AE
 input_shape = c # RGB
 output_shape = input_shape
-model = UNet(input_shape,output_shape).to(device) #  is this correct?
-#model = AE(input_shape=input_shape).to(device)
+model = UNet(input_shape,output_shape).to(device) 
 
 #%% Train
 
@@ -213,7 +174,7 @@ criterion = nn.L1Loss()
 
 # What values should we use here?
 lr = 0.01
-epochs = 5
+epochs = 2
 
 optimizer=torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -247,10 +208,12 @@ for epoch in range(1, epochs+1):
         optimizer.step()
         
         if epoch == epochs:
-            a = 1 # save denoised image 
+            #print("epoch ", epoch, "of total ", epochs )
+            for img, n in zip(denoised_imgs, name):
+                print(" Saving denoised img: ", n)
+                save_the_img(img,n)
         
         
-    
     # compute the epoch training loss
     epoch_loss = epoch_loss / len(trainloader)
     
@@ -262,8 +225,5 @@ print("Time elapsed in minutes: ", (end - start)/60)
 
 #%% Save denoised images
 
-def save_the_img(denoised_imgs, name):
-    
-    save_image(noisy_imgs, r"./data/denoised_images/" + name + ".png")
     
 #%%
